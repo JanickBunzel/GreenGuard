@@ -6,6 +6,7 @@ from PIL import Image
 from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize, Compose
+import torchvision.transforms.functional as TF
 
 # Constants
 BATCH_SIZE = 4
@@ -99,7 +100,7 @@ class DoubleConv(nn.Module):
 		print(f"Input shape: {x.shape}")
 		return self.double_conv(x)
 
-class UNet(nn.Module):
+class NeuralNetwork(nn.Module):
 	def __init__(self, in_channels, out_channels):
 		super().__init__()
 		self.in_channels = in_channels
@@ -149,16 +150,16 @@ class UNet(nn.Module):
 
 		return self.conv_last(x)
 
-# Example of creating a UNet for 3-channel input images and 1-channel output masks
-model = UNet(in_channels=3, out_channels=1)
+# Example of creating a NeuralNetwork for 3-channel input images and 1-channel output masks
+model = NeuralNetwork(in_channels=3, out_channels=1)
 
 
 # Loss function
-loss_fn = nn.CrossEntropyLoss()
+loss_fn = nn.BCEWithLogitsLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
 # Training function
-def train(dataloader, model, loss_fn, optimizer):
+def train(dataloader, model, loss_fn, optimizer, epoch):
 	model.train()
 	for batch, (X, y) in enumerate(dataloader):
 		print(f"Batch {batch}")
@@ -166,6 +167,7 @@ def train(dataloader, model, loss_fn, optimizer):
 		optimizer.zero_grad()
 		pred = model(X)
 		loss = loss_fn(pred, y)
+		print(f"Loss: {loss.item()}")
 		loss.backward()
 		optimizer.step()
 		if batch % 10 == 0:  # Adjust print frequency as needed
@@ -188,16 +190,31 @@ def test(dataloader, model, loss_fn):
 	correct /= size
 	print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
 
+def printimage(model, image_name, epoch):
+	image = Image.open(f'./AmazonForestDataset/Training/images/{image_name}').convert('RGB')
+	image = TF.to_tensor(image)
+
+	prediction = model(image.unsqueeze(0))
+	prediction = TF.to_pil_image(prediction.squeeze(0))
+	prediction.save(f'exports/{image_name}_epoch{epoch}.png')
 
 def main():
+	model.load_state_dict(torch.load('model.pth'))
+
 	# Training loop
 	print("Starting Training...")
 	for epoch in range(5):
-		print(f"Epoch {epoch+1}\n-------------------------------")
-		train(train_dataset_loader, model, loss_fn, optimizer)
+		epoch += 5
+		print(f"Training Epoch {epoch}\n-------------------------------")
+		train(train_dataset_loader, model, loss_fn, optimizer, epoch)
 		
 		# Save the model
-		torch.save(model.state_dict(), "model.pth")
+		torch.save(model.state_dict(), f"model{epoch}.pth")
+		# model.load_state_dict(torch.load('model.pth'))
+
+		print(f"Printing images for epoch {epoch}")
+		printimage(model, "Amazon_5.tiff_50.tiff", epoch)
+		printimage(model, "Amazon_122.tiff_33.tiff", epoch)
 
 		#test(test_dataset_loader, model, loss_fn)
 
