@@ -161,6 +161,7 @@ optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 def train(dataloader, model, loss_fn, optimizer):
 	model.train()
 	for batch, (X, y) in enumerate(dataloader):
+		print(f"Batch {batch}")
 		X, y = X.to(device), y.to(device)
 		optimizer.zero_grad()
 		pred = model(X)
