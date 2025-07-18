@@ -1,4 +1,12 @@
+# Datasets
 AMAZON
 AmazonForestDataset
 DeepGlobe
+
+# NN output
+predictions
+
+# IDE & System
 .DS_Store
+__pycache__
+venv

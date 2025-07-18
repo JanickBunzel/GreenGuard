@@ -9,23 +9,42 @@ from torchvision.transforms import Resize, Compose
 import torchvision.transforms.functional as TF
 
 # Constants
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 NUM_WORKERS = 0
+LEARNING_RATE = 0.001
+IMAGE_TRAINING_SIZE = 64
 
-# Dataset class
+loss_fn = nn.BCEWithLogitsLoss()
+
+OPTIMIZER = "SGD"
+#OPTIMIZER = "Adam"
+
 
 transform = Compose([
-	Resize((512, 512)),  # Ensure all images are the correct size
+	Resize((IMAGE_TRAINING_SIZE, IMAGE_TRAINING_SIZE)),  # Ensure all images are the correct size
 	ToTensor()
 ])
 
+
+# Dataset class
 class ForestDataset(Dataset):
 	def __init__(self, images_dir, masks_dir, transform=None):
 		self.images_dir = images_dir
 		self.masks_dir = masks_dir
 		self.transform = transform
-		self.images = sorted([os.path.join(images_dir, file) for file in os.listdir(images_dir) if file.endswith('.tiff')])
-		self.masks = sorted([os.path.join(masks_dir, file) for file in os.listdir(masks_dir) if file.endswith('.png')])
+		self.images = sorted([
+			os.path.join(images_dir, file)
+			for file in os.listdir(images_dir)
+			if file.endswith('.tiff')
+		])
+		self.masks = sorted([
+			os.path.join(masks_dir, file)
+			for file in os.listdir(masks_dir)
+			if file.endswith('.png')
+		])
+		print("Init Dataset!")
+		print(f"Images: {self.images}")
+		print(f"Masks: {self.masks}")
 
 	def __len__(self):
 		return len(self.images)
@@ -57,9 +76,9 @@ validation_dataset = ForestDataset(
 # Data Loader
 train_dataset_loader = DataLoader(
 	train_dataset,
-	batch_size=4,
-	shuffle=True,
-	num_workers=4,
+	batch_size=BATCH_SIZE,
+	shuffle=False,
+	num_workers=NUM_WORKERS,
 	pin_memory=True,
 )
 
@@ -97,7 +116,7 @@ class DoubleConv(nn.Module):
 		)
 
 	def forward(self, x):
-		print(f"Input shape: {x.shape}")
+		#print(f"Input shape: {x.shape}")
 		return self.double_conv(x)
 
 class NeuralNetwork(nn.Module):
@@ -126,7 +145,8 @@ class NeuralNetwork(nn.Module):
 		self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
 		self.decoder1 = DoubleConv(128, 64)
 
-		self.conv_last = nn.Conv2d(64, out_channels, kernel_size=1)
+		# self.conv_last = nn.Conv2d(64, out_channels, kernel_size=1)
+		self.conv_last = nn.Conv2d(64, 3, kernel_size=1)
 
 	def forward(self, x):
 		# Encoder path
@@ -153,13 +173,38 @@ class NeuralNetwork(nn.Module):
 # Example of creating a NeuralNetwork for 3-channel input images and 1-channel output masks
 model = NeuralNetwork(in_channels=3, out_channels=1)
 
-
-# Loss function
-loss_fn = nn.BCEWithLogitsLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+if OPTIMIZER == "SGD":
+	optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
+elif OPTIMIZER == "Adam":
+	optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Training function
 def train(dataloader, model, loss_fn, optimizer, epoch):
+	# Setting model to training mode
+	model.train()
+
+	for batch, (image, mask) in enumerate(dataloader):
+		print(f"Batch number {batch}")
+
+		# Load the image and mask to the processing device (gpu, mps or cpu)
+		# Commented out because on my macbok its always cpu
+		# 	image = image.to(device)
+		# 	mask = mask.to(device)
+		
+		# Forward pass, let model generate prediction
+		prediction = model(image)
+		
+		# Calculate the loss
+		loss = loss_fn(prediction, mask)
+		print(f"Loss: {loss.item()}")
+		
+		# Reset the gradients, the optimizer for the next iteration
+		loss.backward()
+		optimizer.step()
+		optimizer.zero_grad()
+
+
+def trainOld(dataloader, model, loss_fn, optimizer, epoch):
 	model.train()
 	for batch, (X, y) in enumerate(dataloader):
 		print(f"Batch {batch}")
@@ -172,7 +217,6 @@ def train(dataloader, model, loss_fn, optimizer, epoch):
 		optimizer.step()
 		if batch % 10 == 0:  # Adjust print frequency as needed
 			print(f"Batch {batch}, Loss: {loss.item()}")
-
 
 # Single Test Loop
 def test(dataloader, model, loss_fn):
@@ -190,31 +234,37 @@ def test(dataloader, model, loss_fn):
 	correct /= size
 	print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
 
-def printimage(model, image_name, epoch):
+def printimage(model, image_name, epoch, branch):
 	image = Image.open(f'./AmazonForestDataset/Training/images/{image_name}').convert('RGB')
 	image = TF.to_tensor(image)
 
 	prediction = model(image.unsqueeze(0))
 	prediction = TF.to_pil_image(prediction.squeeze(0))
-	prediction.save(f'exports/{image_name}_epoch{epoch}.png')
+	prediction.save(f'exports/{OPTIMIZER}{IMAGE_TRAINING_SIZE}_{branch}/{image_name.replace(".","_")}/{image_name}_epoch{epoch}.png')
 
 def main():
-	model.load_state_dict(torch.load('model.pth'))
+	# model.load_state_dict(torch.load(f"model{OPTIMIZER}{IMAGE_TRAINING_SIZE}_{BRANCH}.pth"))
+
+	EPOCH_OFFSET = 0
+	PRINT = True
+	BRANCH = "TestConvul"
 
 	# Training loop
-	print("Starting Training...")
-	for epoch in range(5):
-		epoch += 5
-		print(f"Training Epoch {epoch}\n-------------------------------")
+	for epoch in range(10):
+		epoch += EPOCH_OFFSET
+		print(f"Training started for Epoch {epoch}\n-------------------------------")
 		train(train_dataset_loader, model, loss_fn, optimizer, epoch)
+		print(f"Training complete for Epoch {epoch}\n-------------------------------")
 		
 		# Save the model
-		torch.save(model.state_dict(), f"model{epoch}.pth")
+		torch.save(model.state_dict(), f"model{OPTIMIZER}{IMAGE_TRAINING_SIZE}_{BRANCH}.pth")
 		# model.load_state_dict(torch.load('model.pth'))
 
-		print(f"Printing images for epoch {epoch}")
-		printimage(model, "Amazon_5.tiff_50.tiff", epoch)
-		printimage(model, "Amazon_122.tiff_33.tiff", epoch)
+		if PRINT:
+			if epoch % 1 == 0:
+				print(f"Printing images for epoch {epoch}")
+				printimage(model, "Amazon_5.tiff_50.tiff", epoch, BRANCH)
+				printimage(model, "Amazon_122.tiff_33.tiff", epoch, BRANCH)
 
 		#test(test_dataset_loader, model, loss_fn)
 
